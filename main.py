@@ -19,14 +19,13 @@ wdt = machine.WDT(timeout=8000)
 ack_received = False
 iot = "6002"
 wifi_wait_time = 60
-LOOP_INTERVAL = 33 # 迴圈間隔
-sleep_triggered_today = False # [休眠修正] 新增狀態旗標
+LOOP_INTERVAL = 33 # 將循環間隔定義為全域變數
 
 # --- 硬體引腳設定 ---
 led = machine.Pin("LED", machine.Pin.OUT)
 pin_6 = Pin(6, mode=Pin.OUT)
 pin_7 = Pin(7, mode=Pin.OUT)
-pin_6.on(); pin_7.off(); led.on()
+pin_6.off(); pin_7.off(); led.on() # 預設關閉 pin_6
 
 # --- Wi-Fi & I2C ---
 wlan = network.WLAN(network.STA_IF)
@@ -113,48 +112,48 @@ def my_callback(topic, message):
         except: pass
 
 def disable_wdt():
+    """
+    暫時禁用看門狗以執行長時間的阻塞操作。
+    包含對 Pico W 和 Pico 2 W 的兼容性註解。
+    """
     print("看門狗已暫時禁用。")
+    # Pico W (RP2040) 的看門狗控制暫存器位址
     machine.mem32[0x40058000] &= ~(1 << 30)
-    # machine.mem32[0x400d8000] &= ~(1 << 30) # For Pico 2 W
+    
+    # Pico 2 W 的看門狗控制暫存器位址 (如使用 Pico 2 W，請解除此行註解並註解上一行)
+    # machine.mem32[0x400d8000] &= ~(1 << 30)
+
 
 # --- 主程式初始化 ---
 try:
     with open("pizero2on.txt", "r") as f1: pizero2_on = int(f1.read())
     with open("pizero2off.txt", "r") as f2: pizero2_off = int(f2.read())
 except (OSError, ValueError):
-    pizero2_on, pizero2_off = 30, 40
+    pizero2_on, pizero2_off = 30, 50
 
 reset_hour, reset_minute = 12, 10
-sleep_hour = 19
-sleep_duration_seconds = 11 * 3600
+sleep_hour, sleep_minute = 19, 0
+sleep_duration_ms = 11 * 3600 * 1000 
 
 timer = Timer()
 timer.init(freq=1, mode=Timer.PERIODIC, callback=lambda t: led.toggle())
 
+client = None
+
 # 啟動期邏輯
 intervals = wifi_wait_time // LOOP_INTERVAL
+print(f"開始 {wifi_wait_time} 秒的啟動等待期...")
 for i in range(intervals):
     wdt.feed()
     pg, pa, pp = power_read()
     nowtimestamp = "_".join(map(str, time.localtime()[0:6]))
     with open('data.txt', 'a') as f: f.write(f"{nowtimestamp}/{pg}/{pa}/{pp},")
+    print(f"啟動期數據已暫存...等待 {LOOP_INTERVAL} 秒...")
     for _ in range(LOOP_INTERVAL):
         wdt.feed()
         time.sleep(1)
 
-# 連線網路與MQTT
-wifi_connect(ssid, password)
-if not wlan.isconnected(): machine.reset()
-disable_wdt(); set_time();
-wdt = machine.WDT(timeout=8000); wdt.feed()
-disable_wdt(); client = connect_mqtt();
-wdt = machine.WDT(timeout=8000); wdt.feed()
-client.set_callback(my_callback)
-client.subscribe(b'pizero2onoff')
-client.subscribe(b'pico/ack')
-
 # --- 主迴圈 ---
-client = None
 while True:
     wdt.feed()
     loop_start_time = time.time()
@@ -163,34 +162,53 @@ while True:
     current_hour = current_time[3]
     current_minute = current_time[4]
 
-    # [休眠修正] 每天午夜重置休眠標記
-    if current_hour == 0 and current_minute == 0:
-        sleep_triggered_today = False
+    # [夜間休眠功能] 採用禁用看門狗 + 長時 lightsleep 的方法
+    if current_hour == sleep_hour and current_minute == sleep_minute:
+        print("="*40)
+        print(f"到達夜間休眠時間 ({sleep_hour}:{sleep_minute:02d})，準備進入 Light Sleep...")
+        print("="*40)
+        
+        # 步驟 1: 關閉周邊硬體
+        pin_6.off()
+        timer.deinit()
+        led.off()
+        try:
+            client.disconnect()
+            print("MQTT 已離線。")
+        except:
+            pass # 忽略錯誤
+        if wlan.isconnected():
+            wlan.disconnect()
+            wlan.active(False)
+            print("Wi-Fi 已關閉。")
 
-    # [休眠修正] 使用 ">=" 判斷，並增加旗標避免重複觸發
-    if current_hour >= sleep_hour and not sleep_triggered_today:
-        sleep_triggered_today = True # 標記今天已經執行過休眠
-        print("="*40)
-        print(f"到達夜間休眠時間 (>= {sleep_hour}:00)，系統將休眠 11 小時...")
-        print("="*40)
-        
-        pin_6.off(); timer.deinit(); led.off()
-        try: client.disconnect()
-        except: pass
-        if wlan.isconnected(): wlan.disconnect(); wlan.active(False)
-        
+        # 步驟 2: 依照您的要求，禁用看門狗
         disable_wdt()
-        print(f"進入長睡眠，持續 {sleep_duration_seconds} 秒...")
-        time.sleep(sleep_duration_seconds)
 
-        print("休眠結束，正在喚醒並重啟系統...")
+        # 步驟 3: 執行一次性的長時輕度睡眠
+        print(f"系統將進入 Light Sleep {sleep_duration_ms // 1000} 秒 ({sleep_duration_ms // 3600000}小時)...")
+        machine.lightsleep(sleep_duration_ms)
+
+        # 步驟 4: 休眠結束後，直接重啟Pico以確保所有服務回到乾淨狀態
+        print("Light Sleep 結束，正在喚醒並重啟系統...")
         machine.reset()
 
-    if wlan.isconnected() and client is None:
-        client = connect_mqtt()
+
+    # ------ 日間工作邏輯 ------
+    if client is None and wlan.isconnected() == False:
+        print("偵測到 Wi-Fi 未連線，執行連線...")
+        wifi_connect(ssid, password)
+    
+    if client is None and wlan.isconnected() == True:
+        print("偵測到 MQTT 未連線，執行連線...")
+        disable_wdt(); set_time();
+        wdt = machine.WDT(timeout=8000); wdt.feed()
+        disable_wdt(); client = connect_mqtt();
+        wdt = machine.WDT(timeout=8000); wdt.feed()
         if client:
-             client.set_callback(my_callback)
-             client.subscribe(b'pizero2onoff'); client.subscribe(b'pico/ack')
+            client.set_callback(my_callback)
+            client.subscribe(b'pizero2onoff')
+            client.subscribe(b'pico/ack')
     
     print("="*40)
     
@@ -206,6 +224,7 @@ while True:
             try:
                 with open('data.txt', 'r') as f: all_data_to_send = f.read()
             except OSError: pass 
+
             if all_data_to_send:
                 payload = f'"{all_data_to_send}"'
                 try:
@@ -225,6 +244,14 @@ while True:
                     try: client.disconnect()
                     except: pass
                     client = None 
+    else: # 非工作時段
+        pin_6.off() 
+        if client:
+            try: client.disconnect()
+            except: pass
+            client = None
+            print("非工作時段，MQTT 已斷開連線。")
+
     try:
         if client: client.check_msg()
     except Exception as e:
@@ -234,7 +261,10 @@ while True:
         client = None
 
     if current_hour == reset_hour and current_minute == reset_minute:
-        disable_wdt(); time.sleep(5); machine.reset()
+        disable_wdt()
+        print("執行每日定時重啟...");
+        time.sleep(5)
+        machine.reset()
 
     work_duration = time.time() - loop_start_time
     sleep_for = LOOP_INTERVAL - work_duration
