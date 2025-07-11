@@ -17,7 +17,7 @@ nceid = '8988228066614762250'
 nceid_token = "Basic Z3JheUBzb2xhcnNkZ3MuY29tOjk2NzYyMzY0"
 CURRENT_VERSION = 3.0 
 VERSION_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/pizero_version.txt"
-SCRIPT_URL = "https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
+SCRIPT_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
 
 # --- 全域變數 ---
 factor_a, factor_p = 1.0, 1.0
