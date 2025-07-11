@@ -11,10 +11,10 @@ from os import system
 
 # --- 設定 ---
 # [OTA] 版本號和 GitHub Repo 的設定
-CURRENT_VERSION = 3 
+CURRENT_VERSION = 2.5
 # 請將下面的連結換成您自己 GitHub Repo 中的 "Raw" 連結
-VERSION_URL = "https://raw.githubusercontent.com/luftqi/solar_picow6000/main/pizero_version.txt"
-SCRIPT_URL = "https://raw.githubusercontent.com/luftqi/solar_picow6000/main/MQTT_SQLit_Blynk.py"
+VERSION_URL = "https://raw.githubusercontent.com/luftqi/solar_picow6002/main/pizero_version.txt"
+SCRIPT_URL = "https://raw.githubusercontent.com/luftqi/solar_picow6002/main/MQTT_SQLit_Blynk.py"
 
 
 # --- 1NCE 與 Blynk 設定 ---
