@@ -11,6 +11,9 @@ import ina226
 import ubinascii
 from simple import MQTTClient
 from machine import Pin, I2C, Timer
+# --- OTA 相關引入 ---
+import urequests # 通常 OTAUpdater 會需要此模組
+
 
 # 啟用看門狗，超時時間8秒
 wdt = machine.WDT(timeout=8000)
@@ -21,7 +24,7 @@ iot = "6002"
 wifi_wait_time = 60
 LOOP_INTERVAL = 33 
 
-# --- 新增變數：設定最小可用空間閾值 (位元組) ---
+# --- 設定最小可用空間閾值 (位元組) ---
 MIN_FREE_SPACE_BYTES = 50 * 1024 
 
 # --- 硬體引腳設定 ---
@@ -66,7 +69,7 @@ def power_read():
 
 def set_time(hrs_offset=8):
     try:
-        ntptime.settime()
+        ntptime.settime() 
         now_time = time.localtime((time.time() + hrs_offset*3600))
         machine.RTC().datetime((now_time[0], now_time[1], now_time[2], now_time[6], now_time[3], now_time[4], now_time[5], 0))
         print("RTC 時間設定完成")
@@ -76,8 +79,8 @@ def set_time(hrs_offset=8):
 def wifi_connect(ssid, password):
     if wlan.isconnected(): return
     wlan.connect(ssid, password)
-    for _ in range(30):
-        wdt.feed()
+    for _ in range(30): 
+        wdt.feed() 
         if wlan.status() >= 3:
             print(f'Wi-Fi 連線成功，IP: {wlan.ifconfig()[0]}')
             return
@@ -91,13 +94,13 @@ def connect_mqtt():
         client_id = b'solarsdgs' + iot.encode() + b'-' + random_suffix.encode()
         print(f"使用時間戳隨機 Client ID: {client_id.decode()}")
         client = MQTTClient(client_id=client_id, server='10.42.0.1', user=b'solarsdgs'+iot, password=b'82767419', keepalive=7200)
-        client.connect()
+        client.connect() 
         print('成功連接到 MQTT Broker')
         return client
     except Exception as e:
         print('連接 MQTT 失敗:', e); 
         time.sleep(5)
-        # machine.reset() # <--- 這裡維持 reset，因為這是 MQTT 連線的錯誤處理
+        machine.reset() 
 
 def my_callback(topic, message):
     global pizero2_on, pizero2_off, ack_received
@@ -121,17 +124,14 @@ def my_callback(topic, message):
             print(f"pizero2onoff 訊息格式錯誤: {message_str}")
     elif topic_str == 'pico/control' and message_str == 'reboot': 
         print("[CONTROL] 收到重啟指令，正在重啟...")
-        disable_wdt() 
+        # 注意：這裡的 disable_wdt() 已被移除，如果 machine.reset() 啟動慢，WDT 可能在此處觸發。
         time.sleep(2) 
         machine.reset()
 
-def disable_wdt():
-    """
-    暫時禁用看門狗以執行長時間的阻塞操作。
-    """
-    print("看門狗已暫時禁用。")
-    machine.mem32[0x40058000] &= ~(1 << 30)
-    # machine.mem32[0x400d8000] &= ~(1 << 30)
+# --- 移除 disable_wdt 函數 ---
+# def disable_wdt():
+#     print("看門狗已暫時禁用。")
+#     machine.mem32[0x40058000] &= ~(1 << 30)
 
 
 # --- 主程式初始化 ---
@@ -176,6 +176,36 @@ for i in range(intervals):
         wdt.feed()
         time.sleep(1)
 
+# --- 在主迴圈開始前，確保 Wi-Fi 已連線，並執行 OTA 檢查 ---
+print("確保 Wi-Fi 連線並檢查 OTA...")
+# 確保 Wi-Fi 連線
+if not wlan.isconnected():
+    wifi_connect(ssid, password)
+
+# --- OTA 更新邏輯 ---
+# 注意：如果沒有 OTAUpdater 的定義，程式會報錯。
+# 並且，如果 OTA 下載時間超過 8 秒，WDT 會觸發重啟。
+if wlan.isconnected():
+    time.sleep(2) # 稍等片刻，確保網絡穩定
+    print("Connect Github OTA")
+    # 請根據 OTAUpdater 的實際要求調整此 URL 為 Raw GitHub Content URL
+    # 例如: firmware_url = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/"
+    firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
+    print(firmware_url)
+    try:
+        # 假設 OTAUpdater 已經被定義或者從其他模組引入
+        ota_updater = OTAUpdater(firmware_url, "main.py")
+        ota_updater.download_and_install_update_if_available()
+    except OSError as e: # 捕獲操作系統錯誤，例如文件寫入失敗
+        print(f"OTA 更新失敗 (OSError): {e}")
+        pass #
+    except NameError:
+        print("錯誤：OTAUpdater 類別未定義！請確保 OTAUpdater.py 被引入或定義。")
+    except Exception as e: # 捕獲其他未知錯誤
+        print(f"OTA 更新過程中發生未知錯誤: {e}")
+# --- OTA 更新邏輯結束 ---
+
+
 # --- 主迴圈 ---
 while True:
     wdt.feed() 
@@ -192,9 +222,9 @@ while True:
         print("="*40)
         
         # 步驟 1: 關閉周邊硬體和網路連線
-        pin_6.off() # 關閉 pin_6 (Wi-Fi 模組電源)
-        timer.deinit() # 禁用 Timer
-        led.off() # 關閉 LED
+        pin_6.off() 
+        timer.deinit() 
+        led.off() 
         try: # 斷開 MQTT
             if client: 
                 client.disconnect()
@@ -202,49 +232,46 @@ while True:
                 print("MQTT 已離線。")
         except:
             pass 
-        if wlan.isconnected(): # 關閉 Wi-Fi
+        if wlan.isconnected(): 
             wlan.disconnect()
             wlan.active(False)
             print("Wi-Fi 已關閉。")
 
-        # 步驟 2: 禁用看門狗
-        disable_wdt() 
+        # 步驟 2: 這裡不再禁用看門狗。它會持續運行。
+        # 如果 time.sleep(long_sleep_seconds) 超過 8 秒，WDT 將會重啟 Pico。
+        # disable_wdt() 
 
         # 步驟 3: 執行長時間的 time.sleep()
-        
         print(f"系統將進入假休眠 {long_sleep_seconds} 秒 ({long_sleep_seconds // 3600}小時)...")
+        # 在 time.sleep() 期間，由於沒有餵狗，如果超過 8 秒，WDT 將會觸發重啟。
         time.sleep(long_sleep_seconds) 
 
-        # --- 新增：假休眠結束後的硬體及網路重新啟動 ---
+        # --- 假休眠結束後的硬體及網路重新啟動 ---
         print("假休眠結束，正在重新啟動硬體和網路...")
         led.on() 
         timer = Timer() 
         timer.init(freq=1, mode=Timer.PERIODIC, callback=lambda t: led.toggle()) 
-        pin_6.on() # <--- 關鍵：重新開啟 pin6 以便 Wi-Fi 工作
+        pin_6.on() 
         
-        # --- 新增：等待 Pi Zero Wi-Fi 熱點啟動就緒 ---
         print("等待 Pi Zero Wi-Fi 熱點啟動就緒 (至少 30 秒)...")
-        # 這裡給予更長的延遲，確保 Pi Zero 的 Wi-Fi 熱點有足夠時間啟動
-        # 如果 Pi Zero 開機需要 30 秒才分享 Wi-Fi，這裡可以設定 35-40 秒
-        time.sleep(40) # 等待 40 秒，確保 Pi Zero Wi-Fi 熱點就緒
-        # --- 結束新增 ---
-
+        time.sleep(40) 
         print("硬體和網路重啟指令已發送。")
         # ----------------------------------------------------
 
     # ------ 日間工作邏輯 ------
     # 在主迴圈中，根據 client 和 wlan 狀態來嘗試連線
-    if not wlan.isconnected(): # 優先檢查 Wi-Fi
+    if not wlan.isconnected(): 
         print("偵測到 Wi-Fi 未連線，執行連線...")
         wifi_connect(ssid, password)
     
-    if wlan.isconnected() and client is None: # Wi-Fi 連線成功但 MQTT 未連線
+    if wlan.isconnected() and client is None: 
         print("偵測到 MQTT 未連線，執行連線...")
-        disable_wdt(); set_time(); 
+        # set_time() 和 connect_mqtt() 仍然可能因為超過 8 秒而觸發 WDT 重啟
+        set_time(); 
         wdt = machine.WDT(timeout=8000); wdt.feed() 
         
         try:
-            disable_wdt(); client = connect_mqtt(); 
+            client = connect_mqtt(); 
             wdt = machine.WDT(timeout=8000); wdt.feed() 
             if client: 
                 client.set_callback(my_callback)
@@ -317,7 +344,8 @@ while True:
         client = None
 
     if current_hour == reset_hour and current_minute == reset_minute:
-        disable_wdt()
+        # 注意：這裡的 disable_wdt() 已被移除。
+        # 如果 machine.reset() 啟動慢，WDT 可能在此處觸發。
         print("執行每日定時重啟...");
         time.sleep(5)
         machine.reset() 
@@ -330,4 +358,3 @@ while True:
             time.sleep(1)
         wdt.feed()
         time.sleep(sleep_for % 1)
-
