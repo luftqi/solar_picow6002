@@ -6,7 +6,7 @@ import utime
 import ntptime
 import gc
 import machine
-import os
+import os # 確保 os 模組被引入
 import ina226
 import ubinascii
 from simple import MQTTClient
@@ -20,6 +20,11 @@ ack_received = False
 iot = "6002"
 wifi_wait_time = 60
 LOOP_INTERVAL = 33 # 將循環間隔定義為全域變數
+
+# --- 新增變數：設定最小可用空間閾值 (位元組) ---
+# 舉例：設定為 50KB。你需要根據 Pico 的總閃存空間和你的資料量來調整這個值。
+# 通常 Pico 的總閃存空間是 2MB，大部分被韌體佔用，剩餘用於檔案系統。
+MIN_FREE_SPACE_BYTES = 50 * 1024 # 50 KB
 
 # --- 硬體引腳設定 ---
 led = machine.Pin("LED", machine.Pin.OUT)
@@ -110,6 +115,11 @@ def my_callback(topic, message):
                 with open("pizero2on.txt", "w") as f1: f1.write(str(pizero2_on))
                 with open("pizero2off.txt", "w") as f2: f2.write(str(pizero2_off))
         except: pass
+    elif topic_str == 'pico/control' and message_str == 'reboot': # 新增的重啟指令 (如果你之前還沒有)
+        print("[CONTROL] 收到重啟指令，正在重啟...")
+        disable_wdt() # 確保在重啟前禁用 WDT
+        time.sleep(2) # 稍微延遲一下，確保日誌能發出
+        machine.reset()
 
 def disable_wdt():
     """
@@ -147,8 +157,24 @@ for i in range(intervals):
     wdt.feed()
     pg, pa, pp = power_read()
     nowtimestamp = "_".join(map(str, time.localtime()[0:6]))
-    with open('data.txt', 'a') as f: f.write(f"{nowtimestamp}/{pg}/{pa}/{pp},")
-    print(f"啟動期數據已暫存...等待 {LOOP_INTERVAL} 秒...")
+    
+    # --- 新增：檢查可用空間後再寫入 ---
+    try:
+        # os.statvfs('/') 返回一個元組，索引 0 是文件系統塊大小，索引 1 是總塊數，索引 3 是可用塊數
+        f_frsize = os.statvfs('/') [0]
+        f_bfree = os.statvfs('/') [3]
+        current_free_space = f_frsize * f_bfree
+        
+        if current_free_space > MIN_FREE_SPACE_BYTES:
+            with open('data.txt', 'a') as f: f.write(f"{nowtimestamp}/{pg}/{pa}/{pp},")
+            print(f"啟動期數據已暫存... (可用空間: {current_free_space/1024:.2f} KB)")
+        else:
+            print(f"空間不足，啟動期數據未暫存 (可用空間: {current_free_space/1024:.2f} KB < {MIN_FREE_SPACE_BYTES/1024:.2f} KB)")
+    except Exception as e:
+        print(f"檢查空間或寫入啟動期數據時發生錯誤: {e}")
+    # --- 結束新增 ---
+
+    print(f"等待 {LOOP_INTERVAL} 秒...")
     for _ in range(LOOP_INTERVAL):
         wdt.feed()
         time.sleep(1)
@@ -209,13 +235,30 @@ while True:
             client.set_callback(my_callback)
             client.subscribe(b'pizero2onoff')
             client.subscribe(b'pico/ack')
-    
+            # 如果你新增了 pico/control 主題，也要在這裡訂閱
+            client.subscribe(b'pico/control') # 確保這裡也訂閱了
+
     print("="*40)
     
     pg, pa, pp = power_read()
     nowtimestamp = "_".join(map(str, current_time[0:6]))
-    with open('data.txt', 'a') as f: f.write(f"{nowtimestamp}/{pg}/{pa}/{pp},")
-    print(f"數據已暫存")
+    
+    # --- 新增：主迴圈中的空間檢查 ---
+    try:
+        f_frsize = os.statvfs('/') [0]
+        f_bfree = os.statvfs('/') [3]
+        current_free_space = f_frsize * f_bfree
+        
+        if current_free_space > MIN_FREE_SPACE_BYTES:
+            with open('data.txt', 'a') as f: f.write(f"{nowtimestamp}/{pg}/{pa}/{pp},")
+            print(f"數據已暫存 (可用空間: {current_free_space/1024:.2f} KB)")
+        else:
+            print(f"空間不足，數據未暫存 (可用空間: {current_free_space/1024:.2f} KB < {MIN_FREE_SPACE_BYTES/1024:.2f} KB)")
+            # 這裡可以選擇性地發出警報，或者嘗試清除舊數據
+            # 例如：blynk.virtual_write(VIRTUAL_PIN_FOR_ALERT, "空間不足!") (需要 Blynk 連線)
+    except Exception as e:
+        print(f"檢查空間或寫入數據時發生錯誤: {e}")
+    # --- 結束新增 ---
 
     if pizero2_on <= current_minute < pizero2_off:
         if not wlan.isconnected(): wifi_connect(ssid, password)
