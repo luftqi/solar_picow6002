@@ -14,16 +14,16 @@ from os import system
 iot = '6002'
 blynk_token = 'hOALK-HCU1uYRuZ7daGMci5adH1PyqZY'
 nceid = '8988228066614762250'
-nceid_token = "Basic Z3JheUBzb2xhcnNkZ3MuY29tOjk2NzYyMzY0"
+nceid_token = "Basic Z3JheUBzb2xhcnNkZ2MuY29tOjk2NzYyMzY0"
 CURRENT_VERSION = 3.0 
 VERSION_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/pizero_version.txt"
-SCRIPT_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
+SCRIPT_URL = "https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
 
 # --- 全域變數 ---
 factor_a, factor_p = 1.0, 1.0
 pizero2_on, pizero2_off = "30", "50"
 message, message_check = [], []
-blynk = None # <-- 在此處初始化 blynk 變數
+blynk = None # <-- 在此處初始化 blynk 變數 (保持 None，等待初始化迴圈)
 
 # --- MQTT 設定 ---
 broker = '127.0.0.1'
@@ -31,6 +31,7 @@ port = 1883
 topic_sub = "pg_pa_pp"
 topic_pub = "pizero2onoff"
 topic_ack = "pico/ack"
+pico_control_topic = "pico/control" # <--- 新增 Pico 控制主題
 client_id = f'pizero{iot}_0'
 username = f'solarsdgs{iot}'
 password = '82767419'
@@ -95,7 +96,7 @@ def locator():
         return None
     except: return None
 
-def power_read_and_send(message_list, client, location):
+def power_read_and_send(message_list, client_mqtt, location): # 更改參數名避免與 client_id 衝突
     all_uploads_successful = True
     pggg, paaa, pppp, pgaa, pgpp = [], [], [], [], []
     for data_string in message_list:
@@ -138,16 +139,16 @@ def power_read_and_send(message_list, client, location):
     return all_uploads_successful
 
 def connect_mqtt():
-    def on_connect(client, userdata, flags, rc): print(f"連接本地 MQTT Broker {'成功' if rc == 0 else '失敗'}")
-    client = mqtt_client.Client(client_id); client.username_pw_set(username, password)
-    client.on_connect = on_connect; client.connect(broker, port)
-    return client
+    def on_connect(client_mqtt, userdata, flags, rc): print(f"連接本地 MQTT Broker {'成功' if rc == 0 else '失敗'}")
+    client_mqtt = mqtt_client.Client(client_id); client_mqtt.username_pw_set(username, password)
+    client_mqtt.on_connect = on_connect; client_mqtt.connect(broker, port)
+    return client_mqtt
 
-def subscribe(client: mqtt_client):
-    def on_message(client, userdata, msg):
+def subscribe(client_mqtt: mqtt_client):
+    def on_message(client_mqtt, userdata, msg):
         global message
         message = [item for item in msg.payload.decode().strip('"').split(',') if item]
-    client.subscribe(topic_sub); client.on_message = on_message
+    client_mqtt.subscribe(topic_sub); client_mqtt.on_message = on_message
 
 db_name = f"solarsdgs{iot}.db"
 def create_database():
@@ -209,14 +210,30 @@ def v11_write_handler(value):
         blynk.virtual_write(11, 0)
         check_for_updates()
 
+@blynk.on("V13") # <--- 新增的 Blynk 按鈕處理
+def v13_write_handler(value):
+    print(f"[REBOOT_PICO] V13 write event received! Value: {value}")
+    if value and value[0] == '1':
+        print("[REBOOT_PICO] 收到重啟 Pico 指令，發送 MQTT 訊息...")
+        try:
+            client.publish(pico_control_topic, "reboot")
+            blynk.virtual_write(13, 0) # 將按鈕狀態重置為 OFF
+            print("[REBOOT_PICO] MQTT 重啟指令已發送。")
+        except Exception as e:
+            print(f"[REBOOT_PICO] 發送 MQTT 重啟指令失敗: {e}")
+            blynk.virtual_write(13, 0) # 無論如何都重置按鈕
+
 @blynk.on("connected")
 def blynk_connected():
     print("Blynk 已連接，同步伺服器數值...")
-    blynk.sync_virtual(0, 1, 3, 9, 11, 12)
+    blynk.sync_virtual(0, 1, 3, 9, 11, 12, 13) # <--- 新增同步 V13
 
 # --- 主程式初始化 ---
 create_database()
-client = connect_mqtt()
+client = connect_mqtt() # 確保這裡的 client 是你的 MQTT 客戶端物件
+client.loop_start() # <--- 將 client.loop_start() 移到主迴圈外部
+subscribe(client) # <--- 將 subscribe(client) 移到主迴圈外部
+
 default_location = "24.960938,121.247177"
 location = locator()
 if location is None: location = default_location
@@ -224,9 +241,9 @@ print(f"目前使用的位置: {location}")
 
 # --- 主迴圈 ---
 while True:
-    client.loop_start()
-    subscribe(client)
-    blynk.run()
+    # client.loop_start() # <--- 從這裡移除
+    # subscribe(client) # <--- 從這裡移除
+    blynk.run() # Blynk 的 run 方法會處理 MQTT 的 loop，這是正確的
 
     if message and message != message_check:
         print(f"\n偵測到新訊息 (包含 {len(message)} 筆數據)，開始處理...")
@@ -248,7 +265,7 @@ while True:
             if new_data_to_process:
                 print(f"去重後，有 {len(new_data_to_process)} 筆全新數據需要處理。")
                 insert_database_batch(new_data_for_db)
-                upload_successful = power_read_and_send(new_data_to_process, client, location)
+                upload_successful = power_read_and_send(new_data_to_process, client, location) # 確保這裡傳遞的是 MQTT 客戶端物件
                 if upload_successful:
                     print("Blynk 上傳成功，已發送 ACK。")
                     message_check = list(message)
@@ -268,5 +285,5 @@ while True:
         if message == message_check:
             print("無新數據。")
             
-    client.loop_stop()
+    # client.loop_stop() # <--- 從這裡移除，因為 loop_start 移出去了
     time.sleep(5)
