@@ -13,7 +13,7 @@ from simple import MQTTClient
 from machine import Pin, I2C, Timer
 # --- OTA 相關引入 ---
 import urequests # 通常 OTAUpdater 會需要此模組
-
+from ota import OTAUpdater
 
 # 啟用看門狗，超時時間8秒
 wdt = machine.WDT(timeout=8000)
