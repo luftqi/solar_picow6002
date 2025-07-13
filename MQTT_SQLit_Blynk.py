@@ -15,7 +15,7 @@ iot = '6002'
 blynk_token = 'hOALK-HCU1uYRuZ7daGMci5adH1PyqZY'
 nceid = '8988228066614762250'
 nceid_token = "Basic Z3JheUBzb2xhcnNkZ2MuY29tOjk2NzYyMzY0"
-CURRENT_VERSION = 4
+CURRENT_VERSION = 3.0 
 VERSION_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/pizero_version.txt"
 SCRIPT_URL = "https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
 
