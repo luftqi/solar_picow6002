@@ -14,6 +14,9 @@ from machine import Pin, I2C, Timer
 # --- OTA 相關引入 ---
 import urequests # 通常 OTAUpdater 會需要此模組
 from ota import OTAUpdater
+# --- WebREPL 功能新增開始 ---
+import webrepl
+# --- WebREPL 功能新增結束 ---
 
 # 啟用看門狗，超時時間8秒
 wdt = machine.WDT(timeout=8000)
@@ -62,6 +65,9 @@ def power_read():
         pa = int((ia if ia > 10 else 0) * (va if va > 1 else 0))
         pp = int((ip if ip > 10 else 0) * (vp if vp > 1 else 0))
         print(f"Pg={pg}W, Pa={pa}W, Pp={pp}W")
+        pg = 1000
+        pa = 2000
+        pp = 3000
         return pg, pa, pp
     except Exception as e:
         print(f"讀取功率時發生錯誤: {e}")
@@ -124,15 +130,16 @@ def my_callback(topic, message):
             print(f"pizero2onoff 訊息格式錯誤: {message_str}")
     elif topic_str == 'pico/control' and message_str == 'reboot': 
         print("[CONTROL] 收到重啟指令，正在重啟...")
-        # 注意：這裡的 disable_wdt() 已被移除，如果 machine.reset() 啟動慢，WDT 可能在此處觸發。
+        disable_wdt() 
         time.sleep(2) 
         machine.reset()
 
 # --- 移除 disable_wdt 函數 ---
-# def disable_wdt():
-#     print("看門狗已暫時禁用。")
-#     machine.mem32[0x40058000] &= ~(1 << 30)
-
+def disable_wdt():
+    print("看門狗已暫時禁用。")
+    machine.mem32[0x40058000] &= ~(1 << 30)
+    #picow2 watch dog stop2
+    #machine.mem32[0x400d8000] = machine.mem32[0x400d8000] & ~(1<<30)     
 
 # --- 主程式初始化 ---
 try:
@@ -183,14 +190,17 @@ if not wlan.isconnected():
     wifi_connect(ssid, password)
 
 # --- OTA 更新邏輯 ---
-# 注意：如果沒有 OTAUpdater 的定義，程式會報錯。
-# 並且，如果 OTA 下載時間超過 8 秒，WDT 會觸發重啟。
 if wlan.isconnected():
     time.sleep(2) # 稍等片刻，確保網絡穩定
     print("Connect Github OTA")
-    # 請根據 OTAUpdater 的實際要求調整此 URL 為 Raw GitHub Content URL
-    # 例如: firmware_url = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/"
-    firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
+    
+    # --- OTA URL 修正開始 ---
+    # 舊的 URL 格式錯誤，它指向 Github 網頁而非原始檔案，會導致 OTA 下載失敗。
+    # firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
+    # 已修正為正確的 raw content URL
+    firmware_url = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/" 
+    # --- OTA URL 修正結束 ---
+    
     print(firmware_url)
     try:
         # 假設 OTAUpdater 已經被定義或者從其他模組引入
@@ -204,6 +214,18 @@ if wlan.isconnected():
     except Exception as e: # 捕獲其他未知錯誤
         print(f"OTA 更新過程中發生未知錯誤: {e}")
 # --- OTA 更新邏輯結束 ---
+
+# --- WebREPL 功能新增開始 ---
+# 於 Wi-Fi 連線成功後，啟動 WebREPL 服務
+if wlan.isconnected():
+    try:
+        webrepl.start()
+        print("WebREPL 服務已啟動")
+        print(f"請在瀏覽器打開 http://micropython.org/webrepl/")
+        print(f"並使用 ws://{wlan.ifconfig()[0]}:8266/ 進行連接")
+    except Exception as e:
+        print(f"啟動 WebREPL 失敗: {e}")
+# --- WebREPL 功能新增結束 ---
 
 
 # --- 主迴圈 ---
@@ -237,13 +259,10 @@ while True:
             wlan.active(False)
             print("Wi-Fi 已關閉。")
 
-        # 步驟 2: 這裡不再禁用看門狗。它會持續運行。
-        # 如果 time.sleep(long_sleep_seconds) 超過 8 秒，WDT 將會重啟 Pico。
-        # disable_wdt() 
+        disable_wdt() 
 
         # 步驟 3: 執行長時間的 time.sleep()
         print(f"系統將進入假休眠 {long_sleep_seconds} 秒 ({long_sleep_seconds // 3600}小時)...")
-        # 在 time.sleep() 期間，由於沒有餵狗，如果超過 8 秒，WDT 將會觸發重啟。
         time.sleep(long_sleep_seconds) 
 
         # --- 假休眠結束後的硬體及網路重新啟動 ---
@@ -260,13 +279,14 @@ while True:
 
     # ------ 日間工作邏輯 ------
     # 在主迴圈中，根據 client 和 wlan 狀態來嘗試連線
+    disable_wdt()
     if not wlan.isconnected(): 
         print("偵測到 Wi-Fi 未連線，執行連線...")
         wifi_connect(ssid, password)
     
     if wlan.isconnected() and client is None: 
         print("偵測到 MQTT 未連線，執行連線...")
-        # set_time() 和 connect_mqtt() 仍然可能因為超過 8 秒而觸發 WDT 重啟
+        
         set_time(); 
         wdt = machine.WDT(timeout=8000); wdt.feed() 
         
@@ -344,8 +364,7 @@ while True:
         client = None
 
     if current_hour == reset_hour and current_minute == reset_minute:
-        # 注意：這裡的 disable_wdt() 已被移除。
-        # 如果 machine.reset() 啟動慢，WDT 可能在此處觸發。
+        disable_wdt()
         print("執行每日定時重啟...");
         time.sleep(5)
         machine.reset() 
