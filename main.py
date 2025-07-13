@@ -14,6 +14,50 @@ from machine import Pin, I2C, Timer
 # --- OTA 相關引入 ---
 import urequests # 通常 OTAUpdater 會需要此模組
 from ota import OTAUpdater
+# ===================================================================
+# --- WebREPL 首次自動設定 (整合至 main.py) ---
+# 這段程式碼只會在 webrepl_cfg.py 檔案不存在時執行一次。
+# ===================================================================
+try:
+    import os
+    # 檢查根目錄下是否存在 webrepl_cfg.py
+    if 'webrepl_cfg.py' not in os.listdir('/'):
+        print(">>> 未偵測到 WebREPL 設定，正在執行首次自動設定...")
+        
+        # --- 1. 請在這裡修改成您想要的密碼 ---
+        YOUR_SECRET_PASSWORD = "82767419"
+        
+        # 引用必要的函式庫
+        import hashlib
+        import base64
+        import machine
+        
+        # 加密演算法 (與前述相同)
+        WEBREPL_MAGIC = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        combined = YOUR_SECRET_PASSWORD.encode('utf-8') + WEBREPL_MAGIC
+        hash_sha1 = hashlib.sha1(combined)
+        hashed_pass_bytes = base64.b64encode(hash_sha1.digest())
+        hashed_pass_str = hashed_pass_bytes.decode('utf-8')
+        
+        # 準備寫入檔案的內容
+        config_content = f"PASS = '{hashed_pass_str}'\n"
+        
+        # 寫入 (自動建立) webrepl_cfg.py 檔案
+        with open('webrepl_cfg.py', 'w') as f:
+            f.write(config_content)
+            
+        print(">>> WebREPL 設定檔 (webrepl_cfg.py) 已成功建立！")
+        print(">>> 系統將在3秒後自動重啟以套用新設定...")
+        
+        # 等待3秒後重啟，確保設定能被正確載入
+        import time
+        time.sleep(3)
+        machine.reset()
+        
+except Exception as e:
+    print(f"!!! 在執行 WebREPL 自動設定時發生錯誤: {e}")
+# --- WebREPL 首次自動設定結束 ---
+
 # --- WebREPL 功能新增開始 ---
 import webrepl
 # --- WebREPL 功能新增結束 ---
@@ -134,7 +178,7 @@ def my_callback(topic, message):
         time.sleep(2) 
         machine.reset()
 
-# --- 移除 disable_wdt 函數 ---
+# --- disable_wdt 函數 ---
 def disable_wdt():
     print("看門狗已暫時禁用。")
     machine.mem32[0x40058000] &= ~(1 << 30)
@@ -193,14 +237,8 @@ if not wlan.isconnected():
 if wlan.isconnected():
     time.sleep(2) # 稍等片刻，確保網絡穩定
     print("Connect Github OTA")
-    
-    # --- OTA URL 修正開始 ---
-    # 舊的 URL 格式錯誤，它指向 Github 網頁而非原始檔案，會導致 OTA 下載失敗。
-    # firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
-    # 已修正為正確的 raw content URL
-    firmware_url = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/" 
-    # --- OTA URL 修正結束 ---
-    
+    # 根據使用者說明，此 URL 由 OTAUpdater 自行處理，故保留原樣
+    firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
     print(firmware_url)
     try:
         # 假設 OTAUpdater 已經被定義或者從其他模組引入
