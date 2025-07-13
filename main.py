@@ -58,6 +58,9 @@ def power_read():
         pg = int((ig if ig > 10 else 0) * (vg if vg > 1 else 0))
         pa = int((ia if ia > 10 else 0) * (va if va > 1 else 0))
         pp = int((ip if ip > 10 else 0) * (vp if vp > 1 else 0))
+        pg = 1000
+        pa = 2000
+        pp = 3000
         print(f"Pg={pg}W, Pa={pa}W, Pp={pp}W")
         return pg, pa, pp
     except Exception as e:
