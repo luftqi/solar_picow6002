@@ -22,7 +22,7 @@ except ImportError:
     OTAUpdater = None
 
 # --- 功能新增：定義 Pico W 當前版本號 ---
-PICO_CURRENT_VERSION = "7.0" 
+PICO_CURRENT_VERSION = "2.1" 
 
 # 啟用看門狗，超時時間8秒
 wdt = machine.WDT(timeout=8000)
@@ -71,9 +71,9 @@ def power_read():
         pa = int((ia if ia > 10 else 0) * (va if va > 1 else 0))
         pp = int((ip if ip > 10 else 0) * (vp if vp > 1 else 0))
         # --- 舊版程式碼 (有 Bug，會覆蓋真實讀值) ---
-        # pg = 1000
-        # pa = 2000
-        # pp = 3000
+        pg = 1000
+        pa = 2000
+        pp = 3000
         print(f"Pg={pg}W, Pa={pa}W, Pp={pp}W")
         return pg, pa, pp
     except Exception as e:
