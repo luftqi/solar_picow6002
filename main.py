@@ -228,6 +228,7 @@ for i in range(intervals):
         time.sleep(1)
 
 # --- 在主迴圈開始前，確保 Wi-Fi 已連線，並執行 OTA 檢查 ---
+
 print("確保 Wi-Fi 連線並檢查 OTA...")
 # 確保 Wi-Fi 連線
 if not wlan.isconnected():
@@ -235,6 +236,7 @@ if not wlan.isconnected():
 
 # --- OTA 更新邏輯 ---
 if wlan.isconnected():
+    disable_wdt()
     time.sleep(2) # 稍等片刻，確保網絡穩定
     print("Connect Github OTA")
     # 根據使用者說明，此 URL 由 OTAUpdater 自行處理，故保留原樣
