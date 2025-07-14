@@ -1,4 +1,4 @@
-# main.py - 主應用程式 (最終版 - 補全所有功能)
+# main.py - 主應用程式 (最終版 - 修正 OTA 相關錯誤)
 
 # 引入函式庫
 import network
@@ -13,11 +13,8 @@ import ubinascii
 from simple import MQTTClient
 from machine import Pin, I2C, Timer
 import io
-# --- 舊的 import (在此版本中不需要，予以註解) ---
-# from contextlib import redirect_stdout
 
-# --- 功能新增：從 ota.py 引入 OTAUpdater 類別 ---
-# 註解：恢復 Pico W 自身的 OTA 功能所必需的引入
+# --- 功能恢復：OTA 相關引入 ---
 try:
     from ota import OTAUpdater
 except ImportError:
@@ -73,13 +70,11 @@ def power_read():
         pg = int((ig if ig > 10 else 0) * (vg if vg > 1 else 0))
         pa = int((ia if ia > 10 else 0) * (va if va > 1 else 0))
         pp = int((ip if ip > 10 else 0) * (vp if vp > 1 else 0))
-        
         # --- 舊版程式碼 (有 Bug，會覆蓋真實讀值) ---
-        pg = 1000
-        pa = 2000
-        pp = 3000
-
-        print(f"Pg={pg}, Pa={pa}, Pp={pp}")
+        # pg = 1000
+        # pa = 2000
+        # pp = 3000
+        print(f"Pg={pg}W, Pa={pa}W, Pp={pp}W")
         return pg, pa, pp
     except Exception as e:
         print(f"讀取功率時發生錯誤: {e}")
@@ -106,13 +101,15 @@ def wifi_connect(ssid, password):
         time.sleep(1)
     print('Wi-Fi 連線失敗')
 
-# --- 功能新增：將 OTA 邏輯包裝成函數，以便遠端觸發 ---
 def run_ota_check():
     """執行 Pico W 自身的 OTA 更新檢查"""
     global client 
     print("[PICO_OTA] 收到指令，開始執行自身 OTA 更新檢查...")
     try:
-        if client and client.is_connected():
+        # --- 舊版程式碼 (會導致錯誤) ---
+        # if client and client.is_connected():
+        # --- 新版程式碼 (修正 is_connected 錯誤) ---
+        if client:
             client.publish(f'pico/{iot}/cmd/out'.encode(), "[PICO_OTA] Checking for updates...")
     except Exception as e:
         print(f"發布 OTA 狀態時出錯: {e}")
@@ -120,26 +117,29 @@ def run_ota_check():
     if wlan.isconnected():
         if OTAUpdater is None:
             print("[PICO_OTA] 錯誤：OTAUpdater 函式庫未載入。")
-            if client and client.is_connected():
+            if client:
                 client.publish(f'pico/{iot}/cmd/out'.encode(), "[PICO_OTA] Error: OTAUpdater library not found.")
             return
 
         disable_wdt()
         time.sleep(2) 
         print("Connect Github OTA")
-        firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
-        print(firmware_url)
+        # --- 舊版程式碼 (URL 格式不正確) ---
+        # firmware_url = f"https://github.com/luftqi/solar_picow{iot}/refs/heads/main/" 
+        # --- 新版程式碼 (修正為正確的 GitHub Raw 內容 URL) ---
+        firmware_url = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/"
+        
+        print(f"Firmware base URL: {firmware_url}")
         try:
             ota_updater = OTAUpdater(firmware_url, "main.py")
             ota_updater.download_and_install_update_if_available()
-            # 如果更新成功，OTAUpdater 內部會自動重啟
         except Exception as e:
             print(f"OTA 更新過程中發生未知錯誤: {e}")
-            if client and client.is_connected():
+            if client:
                  client.publish(f'pico/{iot}/cmd/out'.encode(), f"[PICO_OTA] Error: {e}")
     else:
         print("[PICO_OTA] Wi-Fi 未連線，無法執行 OTA。")
-        if client and client.is_connected():
+        if client:
              client.publish(f'pico/{iot}/cmd/out'.encode(), "[PICO_OTA] Error: Wi-Fi not connected.")
 
 def connect_mqtt():
@@ -156,23 +156,6 @@ def connect_mqtt():
         time.sleep(5)
         machine.reset() 
 
-# --- 功能修改：擴充 my_callback 函數以處理新指令 ---
-# --- 舊版 my_callback (註解掉，由下方新版取代) ---
-# def my_callback(topic, message):
-#     global pizero2_on, pizero2_off, ack_received, client, PICO_CURRENT_VERSION
-#     topic_str = topic.decode()
-#     message_str = message.decode()
-#     
-#     if topic_str == 'pico/ack' and message_str == 'OK':
-#         ack_received = True
-#     elif topic_str == 'pizero2onoff':
-#         # ... (舊的邏輯) ...
-#     elif topic_str == 'pico/control' and message_str == 'reboot': 
-#         print("[CONTROL] 收到重啟指令，正在重啟...")
-#         time.sleep(2) 
-#         machine.reset()
-
-# --- 新版 my_callback ---
 def my_callback(topic, message):
     global pizero2_on, pizero2_off, ack_received, client, PICO_CURRENT_VERSION
     topic_str = topic.decode()
@@ -237,7 +220,6 @@ def my_callback(topic, message):
         print("[CONTROL] 收到重啟指令，正在重啟...")
         time.sleep(2) 
         machine.reset()
-# --- 函數修改結束 ---
 
 def disable_wdt():
     """
@@ -305,8 +287,6 @@ while True:
 
     # [夜間假休眠功能] 
     if current_hour == sleep_hour and current_minute == sleep_minute:
-        # --- 舊版程式碼 ---
-        # disable_wdt()
         print("="*40)
         print(f"到達夜間休眠時間 ({sleep_hour}:{sleep_minute:02d})，準備進入長時間假休眠...")
         print("="*40)
@@ -324,9 +304,8 @@ while True:
             wlan.disconnect()
             wlan.active(False)
             print("Wi-Fi 已關閉。")
-        
-        # --- 新版程式碼 (在執行 sleep 前才禁用看門狗) ---
-        disable_wdt()
+
+        disable_wdt() 
         print(f"系統將進入假休眠 {long_sleep_seconds} 秒 ({long_sleep_seconds // 3600}小時)...")
         time.sleep(long_sleep_seconds) 
 
@@ -367,11 +346,6 @@ while True:
         if client: 
             try:
                 client.set_callback(my_callback)
-                # --- 舊版訂閱 ---
-                # client.subscribe(b'pizero2onoff')
-                # client.subscribe(b'pico/ack')
-                # client.subscribe(b'pico/control')
-                # --- 新版訂閱 (增加管理主題) ---
                 client.subscribe(b'pizero2onoff')
                 client.subscribe(b'pico/ack')
                 client.subscribe(b'pico/control')
@@ -437,29 +411,12 @@ while True:
             client = None
             print("非工作時段，MQTT 已斷開連線。")
 
-    # --- 舊版程式碼 (註解掉，其功能已移至下方的安全延遲迴圈中) ---
-    # try: 
-    #     if client: client.check_msg()
-    # except Exception as e:
-    #     print(f"檢查MQTT訊息時出錯: {e}")
-    #     try: client.disconnect()
-    #     except: pass
-    #     client = None
-
     if current_hour == reset_hour and current_minute == reset_minute:
         print("執行每日定時重啟...");
         time.sleep(5)
         machine.reset() 
 
-    # --- 程式碼修正：將主迴圈的長睡眠改為安全的迴圈延遲，並在其中持續檢查MQTT訊息 ---
-    # --- 舊版程式碼 ---
-    # work_duration = time.time() - loop_start_time
-    # sleep_for = LOOP_INTERVAL - work_duration
-    # if sleep_for > 0:
-    #     wdt.feed()
-    #     time.sleep(sleep_for)
-    
-    # --- 新版程式碼 (安全的迴圈延遲，會持續餵狗並即時接收指令) ---
+    # --- 修正後的安全延遲迴圈 ---
     work_duration = time.time() - loop_start_time
     sleep_for = LOOP_INTERVAL - work_duration
     if sleep_for > 0:
@@ -475,4 +432,3 @@ while True:
             time.sleep(1)
         wdt.feed()
         time.sleep(sleep_for % 1)
-    # --- 修正結束 ---
