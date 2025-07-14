@@ -18,7 +18,7 @@ nceid = '8988228066614762250'
 nceid_token = "Basic Z3JheUBzb2xhcnNkZ2MuY29tOjk2NzYyMzY0"
 
 # --- Pi Zero 自身 OTA 更新設定 (來自您的原始程式碼) ---
-PIZERO_CURRENT_VERSION = 3.0 
+PIZERO_CURRENT_VERSION = 3.5 
 PIZERO_VERSION_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/pizero_version.txt"
 PIZERO_SCRIPT_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
 
