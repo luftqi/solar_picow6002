@@ -1,4 +1,4 @@
-# new_solarsdgs_6002_pizero2.py (最終版 - 修正事件迴圈衝突問題)
+# new_solarsdgs_6002_pizero2.py (最終版 - 恢復自身OTA功能)
 
 import BlynkLib
 from paho.mqtt import client as mqtt_client
@@ -22,7 +22,7 @@ PIZERO_CURRENT_VERSION = 3.5
 PIZERO_VERSION_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/pizero_version.txt"
 PIZERO_SCRIPT_URL = f"https://raw.githubusercontent.com/luftqi/solar_picow{iot}/main/MQTT_SQLit_Blynk.py"
 
-# --- 功能新增：Pico W 遠端管理設定 ---
+# --- Pico W 遠端管理設定 ---
 SAFE_PICO_MAIN_PY_PATH = 'main_pico_safe_copy.py' 
 
 # --- 全域變數 ---
@@ -257,6 +257,8 @@ def v9_write_handler(value):
     if value: pizero2_off = str(value[0])
     print(f'pizero2_off 更新為: {pizero2_off}')
 
+# --- 程式碼恢復：V11 處理函數，用於 Pi Zero 自身更新 ---
+# 註解：此函數為您原始程式碼中的功能，現已恢復正常運作。
 @blynk.on("V11")
 def v11_write_handler(value):
     print(f"[PIZERO_OTA_HANDLER] V11 write event received! Value: {value}")
@@ -348,15 +350,11 @@ def blynk_connected():
 create_database()
 try:
     client = connect_mqtt() 
-    # --- 舊版程式碼 (註解掉，改為在迴圈中手動處理) ---
+    # --- 程式碼修正：停用會造成衝突的 loop_start() ---
     # client.loop_start() 
 except Exception as e:
     print(f"MQTT 客戶端初始化失敗，程式將重試: {e}")
     client = None
-
-# --- 修改：移除 loop_start() 後，這裡不再需要 if client 判斷 ---
-# if client:
-#     client.loop_start()
 
 default_location = "24.960938,121.247177"
 location = locator()
@@ -365,25 +363,12 @@ print(f"目前使用的位置: {location}")
 
 # --- 主迴圈 ---
 while True:
-    blynk.run()
-
+    blynk.run() 
+    
     # --- 程式碼修正：將 MQTT 事件處理移至主迴圈，與 Blynk 協同運作 ---
-    # 這樣可以避免兩個網路迴圈在不同執行緒中發生衝突。
     if client:
         client.loop(timeout=0.01) # 給予 MQTT 客戶端一小段時間來處理網路事件
-    # --- 修正結束 ---
-    
-    # --- 舊版手動重連邏輯 (註解掉，已無作用且會導致問題) ---
-    """
-    if client and not client.is_connected():
-        print("偵測到 MQTT 已斷線，正在嘗試重連...")
-        try:
-            client.reconnect()
-        except Exception as e:
-            print(f"MQTT 重連失敗: {e}")
-            time.sleep(5) 
-    """
-    
+
     if client and client.is_connected(): 
         if message and message != message_check:
             print(f"\n偵測到新訊息 (包含 {len(message)} 筆數據)，開始處理...")
@@ -422,11 +407,9 @@ while True:
             except Exception as e:
                 print(f"數據處理主流程發生嚴重錯誤: {e}")
         else:
-            # 根據您的要求，恢復「無新數據」的提示
             if message == message_check:
                 print("無新數據。")
     else:
-        # 根據您的要求，恢復「未連線」的提示
         print("MQTT 客戶端未連線，跳過數據處理。")
 
     time.sleep(5)
